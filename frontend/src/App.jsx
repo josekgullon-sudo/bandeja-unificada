@@ -1,0 +1,241 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+const CONVERSATIONS_POLL_MS = 4000;
+const MESSAGES_POLL_MS = 3000;
+
+function channelLabel(channel) {
+  return channel === 'whatsapp' ? 'WhatsApp' : 'Telegram';
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) +
+    ' ' + d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatRemaining(ms) {
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function WindowBadge({ win }) {
+  if (!win) return null;
+  if (win.open) {
+    return (
+      <span className="badge window-open" title="Se puede responder con texto libre">
+        Ventana abierta · {formatRemaining(win.remaining_ms)}
+      </span>
+    );
+  }
+  return (
+    <span className="badge window-closed" title="Fuera de la ventana de 24h: requiere plantilla aprobada">
+      Ventana cerrada
+    </span>
+  );
+}
+
+function ConversationItem({ conv, selected, onSelect }) {
+  const snippet = conv.last_message_body
+    ? (conv.last_message_direction === 'out' ? 'Tú: ' : '') + conv.last_message_body
+    : 'Sin mensajes';
+  return (
+    <li
+      className={`conv-item ${selected ? 'selected' : ''} ${conv.unread ? 'unread' : ''}`}
+      onClick={() => onSelect(conv.id)}
+    >
+      <div className="conv-top">
+        <span className={`channel-tag ${conv.channel}`}>{channelLabel(conv.channel)}</span>
+        <span className="conv-time">{formatTime(conv.last_message_at)}</span>
+      </div>
+      <div className="conv-name">
+        {conv.display_name || conv.external_id}
+        {conv.unread ? <span className="unread-dot" /> : null}
+      </div>
+      <div className="conv-snippet">{snippet}</div>
+      {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
+    </li>
+  );
+}
+
+function MessageBubble({ msg }) {
+  return (
+    <div className={`bubble-row ${msg.direction === 'out' ? 'out' : 'in'}`}>
+      <div className="bubble">
+        <div className="bubble-body">{msg.body}</div>
+        <div className="bubble-meta">
+          {formatTime(msg.created_at)}
+          {msg.direction === 'out' && msg.status ? ` · ${msg.status}` : ''}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [conversations, setConversations] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [thread, setThread] = useState(null); // { conversation, messages }
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(null);
+  const bottomRef = useRef(null);
+  const lastCountRef = useRef(0);
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const res = await fetch('/api/conversations');
+      if (res.ok) setConversations(await res.json());
+    } catch {
+      /* el siguiente poll lo reintenta */
+    }
+  }, []);
+
+  const loadThread = useCallback(async (id) => {
+    try {
+      const res = await fetch(`/api/conversations/${id}/messages`);
+      if (res.ok) setThread(await res.json());
+    } catch {
+      /* el siguiente poll lo reintenta */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConversations();
+    const t = setInterval(loadConversations, CONVERSATIONS_POLL_MS);
+    return () => clearInterval(t);
+  }, [loadConversations]);
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    loadThread(selectedId);
+    const t = setInterval(() => loadThread(selectedId), MESSAGES_POLL_MS);
+    return () => clearInterval(t);
+  }, [selectedId, loadThread]);
+
+  // Autoscroll solo cuando llegan mensajes nuevos
+  useEffect(() => {
+    const count = thread?.messages?.length || 0;
+    if (count !== lastCountRef.current) {
+      lastCountRef.current = count;
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [thread]);
+
+  async function selectConversation(id) {
+    setSelectedId(id);
+    setThread(null);
+    setError(null);
+    lastCountRef.current = 0;
+    fetch(`/api/conversations/${id}/read`, { method: 'POST' }).then(loadConversations);
+  }
+
+  async function sendReply(e) {
+    e.preventDefault();
+    const body = draft.trim();
+    if (!body || sending || selectedId == null) return;
+
+    setSending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/conversations/${selectedId}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || `Error ${res.status}`);
+      } else {
+        setDraft('');
+        await loadThread(selectedId);
+        await loadConversations();
+      }
+    } catch (err) {
+      setError('No se pudo conectar con el servidor');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const conv = thread?.conversation;
+  const windowClosed =
+    conv?.channel === 'whatsapp' && conv.whatsapp_window && !conv.whatsapp_window.open;
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <header className="sidebar-header">
+          <h1>Bandeja unificada</h1>
+        </header>
+        {conversations.length === 0 ? (
+          <p className="empty-list">
+            Sin conversaciones todavía. Cuando un cliente escriba al bot de Telegram
+            o al número de WhatsApp, aparecerá aquí.
+          </p>
+        ) : (
+          <ul className="conv-list">
+            {conversations.map((c) => (
+              <ConversationItem
+                key={c.id}
+                conv={c}
+                selected={c.id === selectedId}
+                onSelect={selectConversation}
+              />
+            ))}
+          </ul>
+        )}
+      </aside>
+
+      <main className="thread">
+        {!conv ? (
+          <div className="thread-empty">Selecciona una conversación</div>
+        ) : (
+          <>
+            <header className="thread-header">
+              <div>
+                <span className={`channel-tag ${conv.channel}`}>{channelLabel(conv.channel)}</span>
+                <strong className="thread-name">{conv.display_name || conv.external_id}</strong>
+              </div>
+              {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
+            </header>
+
+            <div className="messages">
+              {thread.messages.map((m) => (
+                <MessageBubble key={m.id} msg={m} />
+              ))}
+              <div ref={bottomRef} />
+            </div>
+
+            {windowClosed && (
+              <div className="window-warning">
+                Ventana de 24h cerrada: WhatsApp solo permite plantillas aprobadas.
+                El envío de texto libre fallará.
+              </div>
+            )}
+            {error && <div className="send-error">{error}</div>}
+
+            <form className="reply-box" onSubmit={sendReply}>
+              <input
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Escribe una respuesta…"
+                disabled={sending}
+              />
+              <button type="submit" disabled={sending || !draft.trim()}>
+                {sending ? 'Enviando…' : 'Enviar'}
+              </button>
+            </form>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
