@@ -5,6 +5,7 @@ node_modules/
 *.db-wal
 *.db-shm
 backend/db/*.db
+backend/uploads/
 frontend/dist/
 .DS_Store
 logs/

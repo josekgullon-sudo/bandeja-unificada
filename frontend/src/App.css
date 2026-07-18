@@ -55,7 +55,38 @@ body {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
 }
+
+.conv-content { flex: 1; min-width: 0; }
+
+.avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.avatar.small { width: 36px; height: 36px; }
+
+.avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 18px;
+  background: #9aa0a6;
+}
+
+.avatar-fallback.telegram { background: var(--tg-blue); }
+.avatar-fallback.whatsapp { background: var(--wa-green-dark); }
+
+.thread-title { display: flex; align-items: center; gap: 10px; }
+.thread-username { font-size: 12px; color: var(--text-muted); margin-left: 10px; }
 
 .conv-item:hover { background: #f5f6f7; }
 .conv-item.selected { background: #e7f3ff; }
@@ -176,6 +207,28 @@ body {
 .bubble-row.out .bubble { background: #d9fdd3; }
 
 .bubble-body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+
+.bubble-media {
+  max-width: 320px;
+  max-height: 320px;
+  width: 100%;
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 4px;
+  object-fit: contain;
+}
+
+.bubble-audio { max-width: 280px; display: block; margin-bottom: 4px; }
+
+.bubble-file {
+  display: inline-block;
+  margin-bottom: 4px;
+  color: #0b6bcb;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.bubble-file:hover { text-decoration: underline; }
 
 .bubble-meta {
   font-size: 11px;

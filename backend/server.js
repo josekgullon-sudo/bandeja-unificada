@@ -53,6 +53,10 @@ if (INBOX_USER && INBOX_PASS) {
 
 app.use('/api', api);
 
+// Adjuntos descargados (fotos, audios, documentos). Protegidos por la misma
+// autenticación básica: este middleware va después del bloque de auth.
+app.use('/media', express.static(path.join(__dirname, 'uploads')));
+
 // En producción servimos el build de React desde el propio Express,
 // así solo hay un proceso y un puerto que exponer en Nginx.
 const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');

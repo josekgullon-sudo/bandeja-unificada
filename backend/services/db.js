@@ -13,6 +13,11 @@ db.pragma('foreign_keys = ON');
 const schema = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
 db.exec(schema);
 
+// Migraciones ligeras para bases creadas con versiones anteriores del esquema
+const convCols = db.prepare('PRAGMA table_info(conversations)').all().map((c) => c.name);
+if (!convCols.includes('username')) db.exec('ALTER TABLE conversations ADD COLUMN username TEXT');
+if (!convCols.includes('avatar_url')) db.exec('ALTER TABLE conversations ADD COLUMN avatar_url TEXT');
+
 function nowISO() {
   return new Date().toISOString();
 }
@@ -83,18 +88,73 @@ function saveIncomingMessage(conversationId, { body, mediaUrl, channelMessageId 
 /**
  * Guarda un mensaje saliente (respuesta de un agente) y actualiza last_message_at.
  */
-function saveOutgoingMessage(conversationId, { body, channelMessageId, status }) {
+function saveOutgoingMessage(conversationId, { body, mediaUrl, channelMessageId, status }) {
   const ts = nowISO();
   const result = db
     .prepare(
-      `INSERT INTO messages (conversation_id, direction, body, channel_message_id, status, created_at)
-       VALUES (?, 'out', ?, ?, ?, ?)`
+      `INSERT INTO messages (conversation_id, direction, body, media_url, channel_message_id, status, created_at)
+       VALUES (?, 'out', ?, ?, ?, ?, ?)`
     )
-    .run(conversationId, body, channelMessageId ? String(channelMessageId) : null, status || 'sent', ts);
+    .run(conversationId, body, mediaUrl || null, channelMessageId ? String(channelMessageId) : null, status || 'sent', ts);
 
   db.prepare('UPDATE conversations SET last_message_at = ? WHERE id = ?').run(ts, conversationId);
 
   return result.lastInsertRowid;
+}
+
+/**
+ * Actualiza username y/o avatar de una conversación (solo campos provistos).
+ */
+function updateConversationProfile(id, { username, avatarUrl }) {
+  if (username !== undefined) {
+    db.prepare('UPDATE conversations SET username = ? WHERE id = ?').run(username, id);
+  }
+  if (avatarUrl !== undefined) {
+    db.prepare('UPDATE conversations SET avatar_url = ? WHERE id = ?').run(avatarUrl, id);
+  }
+}
+
+/**
+ * Inserta un mensaje histórico con su fecha original, sin tocar los
+ * timestamps de la conversación ni el estado de no leído. Idempotente:
+ * si ya existe (por channel_message_id) no hace nada.
+ */
+function importMessage(conversationId, { direction, body, mediaUrl, channelMessageId, createdAt, status }) {
+  if (channelMessageId && hasMessage(conversationId, channelMessageId)) return false;
+  db.prepare(
+    `INSERT INTO messages (conversation_id, direction, body, media_url, channel_message_id, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    conversationId,
+    direction,
+    body || null,
+    mediaUrl || null,
+    channelMessageId ? String(channelMessageId) : null,
+    status || null,
+    createdAt || nowISO()
+  );
+  return true;
+}
+
+/**
+ * Recalcula last_message_at y last_customer_message_at a partir de los
+ * mensajes guardados (se usa tras importar historial).
+ */
+function recalcConversationTimestamps(conversationId) {
+  const row = db
+    .prepare(
+      `SELECT MAX(created_at) AS last_any,
+              (SELECT MAX(created_at) FROM messages
+               WHERE conversation_id = ? AND direction = 'in') AS last_in
+       FROM messages WHERE conversation_id = ?`
+    )
+    .get(conversationId, conversationId);
+  db.prepare(
+    `UPDATE conversations
+     SET last_message_at = COALESCE(?, last_message_at),
+         last_customer_message_at = COALESCE(?, last_customer_message_at)
+     WHERE id = ?`
+  ).run(row.last_any, row.last_in, conversationId);
 }
 
 /**
@@ -154,6 +214,9 @@ module.exports = {
   saveIncomingMessage,
   saveOutgoingMessage,
   hasMessage,
+  updateConversationProfile,
+  importMessage,
+  recalcConversationTimestamps,
   updateMessageStatusByChannelId,
   listConversations,
   getConversation,

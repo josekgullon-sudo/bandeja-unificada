@@ -41,6 +41,14 @@ function WindowBadge({ win }) {
   );
 }
 
+function Avatar({ conv, size }) {
+  if (conv.avatar_url) {
+    return <img className={`avatar ${size || ''}`} src={conv.avatar_url} alt="" loading="lazy" />;
+  }
+  const initial = (conv.display_name || conv.external_id || '?').charAt(0).toUpperCase();
+  return <div className={`avatar avatar-fallback ${conv.channel} ${size || ''}`}>{initial}</div>;
+}
+
 function ConversationItem({ conv, selected, onSelect }) {
   const snippet = conv.last_message_body
     ? (conv.last_message_direction === 'out' ? 'Tú: ' : '') + conv.last_message_body
@@ -50,17 +58,42 @@ function ConversationItem({ conv, selected, onSelect }) {
       className={`conv-item ${selected ? 'selected' : ''} ${conv.unread ? 'unread' : ''}`}
       onClick={() => onSelect(conv.id)}
     >
-      <div className="conv-top">
-        <span className={`channel-tag ${conv.channel}`}>{channelLabel(conv.channel)}</span>
-        <span className="conv-time">{formatTime(conv.last_message_at)}</span>
+      <Avatar conv={conv} />
+      <div className="conv-content">
+        <div className="conv-top">
+          <span className={`channel-tag ${conv.channel}`}>{channelLabel(conv.channel)}</span>
+          <span className="conv-time">{formatTime(conv.last_message_at)}</span>
+        </div>
+        <div className="conv-name">
+          {conv.display_name || conv.external_id}
+          {conv.unread ? <span className="unread-dot" /> : null}
+        </div>
+        <div className="conv-snippet">{snippet}</div>
+        {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
       </div>
-      <div className="conv-name">
-        {conv.display_name || conv.external_id}
-        {conv.unread ? <span className="unread-dot" /> : null}
-      </div>
-      <div className="conv-snippet">{snippet}</div>
-      {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
     </li>
+  );
+}
+
+function MediaContent({ url }) {
+  const ext = (url.split('.').pop() || '').toLowerCase();
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer">
+        <img className="bubble-media" src={url} alt="" loading="lazy" />
+      </a>
+    );
+  }
+  if (['ogg', 'oga', 'mp3', 'm4a', 'wav'].includes(ext)) {
+    return <audio className="bubble-audio" controls src={url} preload="none" />;
+  }
+  if (['mp4', 'webm'].includes(ext)) {
+    return <video className="bubble-media" controls src={url} preload="metadata" />;
+  }
+  return (
+    <a className="bubble-file" href={url} target="_blank" rel="noreferrer" download>
+      ⬇️ Descargar archivo
+    </a>
   );
 }
 
@@ -68,6 +101,7 @@ function MessageBubble({ msg }) {
   return (
     <div className={`bubble-row ${msg.direction === 'out' ? 'out' : 'in'}`}>
       <div className="bubble">
+        {msg.media_url && <MediaContent url={msg.media_url} />}
         <div className="bubble-body">{msg.body}</div>
         <div className="bubble-meta">
           {formatTime(msg.created_at)}
@@ -199,9 +233,15 @@ export default function App() {
         ) : (
           <>
             <header className="thread-header">
-              <div>
-                <span className={`channel-tag ${conv.channel}`}>{channelLabel(conv.channel)}</span>
-                <strong className="thread-name">{conv.display_name || conv.external_id}</strong>
+              <div className="thread-title">
+                <Avatar conv={conv} size="small" />
+                <div>
+                  <div>
+                    <span className={`channel-tag ${conv.channel}`}>{channelLabel(conv.channel)}</span>
+                    <strong className="thread-name">{conv.display_name || conv.external_id}</strong>
+                  </div>
+                  {conv.username && <div className="thread-username">{conv.username}</div>}
+                </div>
               </div>
               {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
             </header>

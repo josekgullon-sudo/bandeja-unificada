@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   channel TEXT NOT NULL CHECK (channel IN ('whatsapp', 'telegram')),
   external_id TEXT NOT NULL,
   display_name TEXT,
+  username TEXT,
+  avatar_url TEXT,
   last_message_at TEXT,
   last_customer_message_at TEXT,
   unread INTEGER NOT NULL DEFAULT 0,
