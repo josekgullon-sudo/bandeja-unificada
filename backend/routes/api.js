@@ -8,6 +8,7 @@ const {
   saveOutgoingMessage,
 } = require('../services/db');
 const telegram = require('../services/telegram');
+const telegramUser = require('../services/telegram-user');
 const whatsapp = require('../services/whatsapp');
 
 /**
@@ -57,7 +58,11 @@ router.post('/conversations/:id/reply', async (req, res) => {
     let channelMessageId = null;
 
     if (conversation.channel === 'telegram') {
-      channelMessageId = await telegram.sendMessage(conversation.external_id, body);
+      // Con sesión de cuenta personal se responde en nombre del dueño;
+      // si no, se usa el bot clásico.
+      channelMessageId = telegramUser.enabled()
+        ? await telegramUser.sendMessage(conversation.external_id, body)
+        : await telegram.sendMessage(conversation.external_id, body);
     } else if (conversation.channel === 'whatsapp') {
       const win = whatsapp.windowInfo(conversation.last_customer_message_at);
       if (!win.open) {

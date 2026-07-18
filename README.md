@@ -10,9 +10,31 @@ respuestas automáticas; solo se envía cuando una persona pulsa enviar.
 - **Backend:** Node.js + Express (puerto 3000 por defecto)
 - **Base de datos:** SQLite (`backend/db/inbox.db`, se crea sola al arrancar)
 - **Frontend:** React + Vite (en producción lo sirve el propio Express desde `frontend/dist`)
-- **Telegram:** long polling (no requiere HTTPS ni URL pública)
+- **Telegram:** dos modos —
+  - **Cuenta personal (recomendado):** la bandeja se conecta vía MTProto
+    (GramJS) como un dispositivo más de la cuenta del dueño y recibe sus
+    chats privados. Los clientes escriben al número/usuario de siempre.
+  - **Bot:** long polling con la Bot API; los clientes escriben al bot.
 - **WhatsApp:** webhook `GET/POST /webhook` + envío por Graph API
 - **Despliegue:** PM2 + Nginx + Let's Encrypt en VPS
+
+## Telegram en modo cuenta personal
+
+1. Entrar en <https://my.telegram.org> con el número de la cuenta → **API
+   development tools** → crear una app → copiar `api_id` y `api_hash`.
+2. Ponerlos en `backend/.env` como `TELEGRAM_API_ID` y `TELEGRAM_API_HASH`.
+3. Autorizar la sesión (una única vez): `node scripts/telegram-login.js`
+   dentro de `backend/`. Pide teléfono, código (llega a la app de Telegram)
+   y contraseña 2FA si existe. Imprime el valor de `TELEGRAM_SESSION` para
+   pegar en el `.env`.
+4. Reiniciar: `pm2 restart inbox`.
+
+La sesión aparece en Telegram → Ajustes → Dispositivos y puede revocarse
+desde ahí en cualquier momento (habría que repetir el paso 3).
+
+⚠️ Con este modo, quien tenga acceso a la bandeja (o al `.env`) puede leer y
+escribir como la cuenta de Telegram. Definir SIEMPRE `INBOX_USER`/`INBOX_PASS`
+y servir bajo HTTPS.
 
 ## Puesta en marcha (local o VPS)
 
@@ -51,7 +73,10 @@ escribe al bot desde tu Telegram personal y el mensaje aparecerá en la bandeja.
 
 | Variable | Descripción |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | Token del bot obtenido de @BotFather |
+| `INBOX_USER` / `INBOX_PASS` | Usuario y contraseña de acceso a la bandeja (obligatorio si está expuesta) |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | Credenciales de my.telegram.org (modo cuenta personal) |
+| `TELEGRAM_SESSION` | Sesión autorizada, generada con `scripts/telegram-login.js` |
+| `TELEGRAM_BOT_TOKEN` | Token del bot de @BotFather (solo modo bot) |
 | `WHATSAPP_TOKEN` | Token permanente de sistema de la app de Meta |
 | `WHATSAPP_PHONE_NUMBER_ID` | Phone Number ID del número de la Cloud API |
 | `WHATSAPP_VERIFY_TOKEN` | Cadena secreta propia para verificar el webhook |

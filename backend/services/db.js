@@ -97,6 +97,19 @@ function saveOutgoingMessage(conversationId, { body, channelMessageId, status })
   return result.lastInsertRowid;
 }
 
+/**
+ * ¿Existe ya un mensaje (en cualquier dirección) con este id de canal en la
+ * conversación? Evita duplicados cuando la propia bandeja envía y luego
+ * recibe el eco del mensaje por la sesión de cuenta personal.
+ */
+function hasMessage(conversationId, channelMessageId) {
+  return Boolean(
+    db
+      .prepare('SELECT 1 FROM messages WHERE conversation_id = ? AND channel_message_id = ?')
+      .get(conversationId, String(channelMessageId))
+  );
+}
+
 function updateMessageStatusByChannelId(channelMessageId, status) {
   db.prepare(
     `UPDATE messages SET status = ? WHERE channel_message_id = ? AND direction = 'out'`
@@ -140,6 +153,7 @@ module.exports = {
   findOrCreateConversation,
   saveIncomingMessage,
   saveOutgoingMessage,
+  hasMessage,
   updateMessageStatusByChannelId,
   listConversations,
   getConversation,
