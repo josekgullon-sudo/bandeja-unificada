@@ -63,9 +63,10 @@ function ConversationItem({ conv, selected, onSelect, me }) {
   const snippet = conv.last_message_body
     ? (conv.last_message_direction === 'out' ? 'Tú: ' : '') + conv.last_message_body
     : 'Sin mensajes';
+  const attendedByOther = conv.attending && conv.attending.agent !== me;
   return (
     <li
-      className={`conv-item ${selected ? 'selected' : ''} ${conv.unread ? 'unread' : ''}`}
+      className={`conv-item ${selected ? 'selected' : ''} ${conv.unread ? 'unread' : ''} ${attendedByOther ? 'attended-other' : ''}`}
       onClick={() => onSelect(conv.id)}
     >
       <Avatar conv={conv} />

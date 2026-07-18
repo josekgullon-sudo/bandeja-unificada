@@ -91,6 +91,14 @@ body {
 .conv-item:hover { background: #f5f6f7; }
 .conv-item.selected { background: #e7f3ff; }
 
+/* Conversación en atención por OTRO agente: fondo ámbar + barra lateral */
+.conv-item.attended-other {
+  background: #fff8e1;
+  box-shadow: inset 4px 0 0 #f2c94c;
+}
+.conv-item.attended-other:hover { background: #fdf2d0; }
+.conv-item.attended-other.selected { background: #fbeec1; }
+
 .conv-top {
   display: flex;
   justify-content: space-between;
