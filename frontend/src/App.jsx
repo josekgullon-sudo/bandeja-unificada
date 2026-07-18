@@ -224,7 +224,7 @@ export default function App() {
   const attendedByOther = conv?.attending && conv.attending.agent !== me;
 
   return (
-    <div className="app">
+    <div className={`app ${selectedId != null ? 'has-selection' : ''}`}>
       <aside className="sidebar">
         <header className="sidebar-header">
           <h1>Bandeja unificada</h1>
@@ -256,6 +256,13 @@ export default function App() {
           <>
             <header className="thread-header">
               <div className="thread-title">
+                <button
+                  className="back-btn"
+                  onClick={() => { setSelectedId(null); setThread(null); }}
+                  aria-label="Volver a la lista"
+                >
+                  ←
+                </button>
                 <Avatar conv={conv} size="small" />
                 <div>
                   <div>
