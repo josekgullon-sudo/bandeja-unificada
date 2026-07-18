@@ -17,9 +17,14 @@ app.use('/webhook', webhookWhatsapp);
 app.use('/telegram/webhook', webhookTelegram);
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// --- Autenticación básica para la bandeja (interfaz + API interna) ---
-// Se activa definiendo INBOX_USER e INBOX_PASS en el .env. Imprescindible
-// si la bandeja está expuesta a internet.
+// --- Autenticación de la bandeja (interfaz + API interna) ---
+// Dos fuentes de credenciales, ambas válidas a la vez:
+//  1. INBOX_USER/INBOX_PASS del .env (cuenta "maestra" de emergencia)
+//  2. Tabla de agentes (se crean con: node scripts/add-user.js usuario clave)
+// Cada petición identifica al agente para firmar sus respuestas.
+const { getAgentByUsername, countAgents } = require('./services/db');
+const { verifyPassword } = require('./services/auth');
+
 const INBOX_USER = process.env.INBOX_USER || '';
 const INBOX_PASS = process.env.INBOX_PASS || '';
 
@@ -29,25 +34,50 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-if (INBOX_USER && INBOX_PASS) {
+// Cache de tokens ya verificados para no recalcular scrypt en cada poll.
+const authCache = new Map();
+
+function authenticate(header) {
+  if (!header || !header.startsWith('Basic ')) return null;
+  const token = header.slice(6);
+  if (authCache.has(token)) return authCache.get(token);
+
+  const decoded = Buffer.from(token, 'base64').toString('utf8');
+  const sep = decoded.indexOf(':');
+  if (sep <= 0) return null;
+  const user = decoded.slice(0, sep);
+  const pass = decoded.slice(sep + 1);
+
+  let ok = false;
+  if (INBOX_USER && INBOX_PASS && safeEqual(user, INBOX_USER) && safeEqual(pass, INBOX_PASS)) {
+    ok = true;
+  } else {
+    const agent = getAgentByUsername(user);
+    ok = Boolean(agent && verifyPassword(pass, agent.password_hash));
+  }
+  if (!ok) return null;
+
+  if (authCache.size > 200) authCache.clear();
+  authCache.set(token, user);
+  return user;
+}
+
+const authRequired = Boolean((INBOX_USER && INBOX_PASS) || countAgents() > 0);
+
+if (authRequired) {
   app.use((req, res, next) => {
-    const header = req.headers.authorization || '';
-    if (header.startsWith('Basic ')) {
-      const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-      const sep = decoded.indexOf(':');
-      const user = decoded.slice(0, sep);
-      const pass = decoded.slice(sep + 1);
-      if (sep > 0 && safeEqual(user, INBOX_USER) && safeEqual(pass, INBOX_PASS)) {
-        return next();
-      }
+    const user = authenticate(req.headers.authorization);
+    if (user) {
+      req.agent = user;
+      return next();
     }
     res.set('WWW-Authenticate', 'Basic realm="Bandeja unificada", charset="UTF-8"');
     return res.status(401).send('Autenticación requerida');
   });
 } else {
   console.warn(
-    '[seguridad] INBOX_USER/INBOX_PASS no definidos: la bandeja queda SIN contraseña. ' +
-    'Definelos en .env si el puerto es accesible desde internet.'
+    '[seguridad] Sin INBOX_USER/INBOX_PASS ni agentes creados: la bandeja queda SIN contraseña. ' +
+    'Crea usuarios con: node scripts/add-user.js <usuario> <contraseña>'
   );
 }
 

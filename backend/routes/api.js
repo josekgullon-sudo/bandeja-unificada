@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   listConversations,
+  lastOutgoingInfo,
   getConversation,
   listMessages,
   markConversationRead,
@@ -11,16 +12,43 @@ const telegram = require('../services/telegram');
 const telegramUser = require('../services/telegram-user');
 const whatsapp = require('../services/whatsapp');
 
+// Ventana de "en atención": si alguien respondió hace menos de X minutos,
+// los demás agentes ven el aviso para no pisarse. Configurable con
+// ATTEND_MINUTES en el .env (por defecto 10).
+const ATTEND_MS = parseInt(process.env.ATTEND_MINUTES || '10', 10) * 60 * 1000;
+
+function attendingFrom(lastOutAgent, lastOutAt) {
+  if (!lastOutAt) return null;
+  const elapsed = Date.now() - Date.parse(lastOutAt);
+  if (elapsed >= ATTEND_MS) return null;
+  return {
+    agent: lastOutAgent || 'móvil',
+    at: lastOutAt,
+    elapsed_ms: elapsed,
+  };
+}
+
+/**
+ * GET /api/me — identidad del agente autenticado (para la interfaz).
+ */
+router.get('/me', (req, res) => {
+  res.json({ username: req.agent || null });
+});
+
 /**
  * GET /api/conversations — lista ordenada por último mensaje, con snippet
  * del último mensaje y, para WhatsApp, el estado de la ventana de 24h.
  */
 router.get('/conversations', (req, res) => {
-  const conversations = listConversations().map((c) => ({
-    ...c,
-    unread: Boolean(c.unread),
-    whatsapp_window: c.channel === 'whatsapp' ? whatsapp.windowInfo(c.last_customer_message_at) : null,
-  }));
+  const conversations = listConversations().map((c) => {
+    const { last_out_agent, last_out_at, ...rest } = c;
+    return {
+      ...rest,
+      unread: Boolean(c.unread),
+      whatsapp_window: c.channel === 'whatsapp' ? whatsapp.windowInfo(c.last_customer_message_at) : null,
+      attending: attendingFrom(last_out_agent, last_out_at),
+    };
+  });
   res.json(conversations);
 });
 
@@ -30,6 +58,7 @@ router.get('/conversations', (req, res) => {
 router.get('/conversations/:id/messages', (req, res) => {
   const conversation = getConversation(req.params.id);
   if (!conversation) return res.status(404).json({ error: 'Conversación no encontrada' });
+  const lastOut = lastOutgoingInfo(conversation.id) || {};
   res.json({
     conversation: {
       ...conversation,
@@ -38,6 +67,7 @@ router.get('/conversations/:id/messages', (req, res) => {
         conversation.channel === 'whatsapp'
           ? whatsapp.windowInfo(conversation.last_customer_message_at)
           : null,
+      attending: attendingFrom(lastOut.last_out_agent, lastOut.last_out_at),
     },
     messages: listMessages(conversation.id),
   });
@@ -82,6 +112,7 @@ router.post('/conversations/:id/reply', async (req, res) => {
       body,
       channelMessageId,
       status: 'sent',
+      agent: req.agent || null,
     });
 
     res.json({ ok: true, message_id: messageId });

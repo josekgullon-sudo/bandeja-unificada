@@ -17,6 +17,8 @@ db.exec(schema);
 const convCols = db.prepare('PRAGMA table_info(conversations)').all().map((c) => c.name);
 if (!convCols.includes('username')) db.exec('ALTER TABLE conversations ADD COLUMN username TEXT');
 if (!convCols.includes('avatar_url')) db.exec('ALTER TABLE conversations ADD COLUMN avatar_url TEXT');
+const msgCols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
+if (!msgCols.includes('agent')) db.exec('ALTER TABLE messages ADD COLUMN agent TEXT');
 
 function nowISO() {
   return new Date().toISOString();
@@ -88,14 +90,14 @@ function saveIncomingMessage(conversationId, { body, mediaUrl, channelMessageId 
 /**
  * Guarda un mensaje saliente (respuesta de un agente) y actualiza last_message_at.
  */
-function saveOutgoingMessage(conversationId, { body, mediaUrl, channelMessageId, status }) {
+function saveOutgoingMessage(conversationId, { body, mediaUrl, channelMessageId, status, agent }) {
   const ts = nowISO();
   const result = db
     .prepare(
-      `INSERT INTO messages (conversation_id, direction, body, media_url, channel_message_id, status, created_at)
-       VALUES (?, 'out', ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (conversation_id, direction, body, media_url, channel_message_id, status, agent, created_at)
+       VALUES (?, 'out', ?, ?, ?, ?, ?, ?)`
     )
-    .run(conversationId, body, mediaUrl || null, channelMessageId ? String(channelMessageId) : null, status || 'sent', ts);
+    .run(conversationId, body, mediaUrl || null, channelMessageId ? String(channelMessageId) : null, status || 'sent', agent || null, ts);
 
   db.prepare('UPDATE conversations SET last_message_at = ? WHERE id = ?').run(ts, conversationId);
 
@@ -185,11 +187,47 @@ function listConversations() {
                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_body,
               (SELECT direction FROM messages m
                WHERE m.conversation_id = c.id
-               ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_direction
+               ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_direction,
+              (SELECT agent FROM messages m
+               WHERE m.conversation_id = c.id AND m.direction = 'out'
+               ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_out_agent,
+              (SELECT created_at FROM messages m
+               WHERE m.conversation_id = c.id AND m.direction = 'out'
+               ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_out_at
        FROM conversations c
        ORDER BY c.last_message_at DESC`
     )
     .all();
+}
+
+/** Último mensaje saliente de una conversación (para el aviso "en atención"). */
+function lastOutgoingInfo(conversationId) {
+  return db
+    .prepare(
+      `SELECT agent AS last_out_agent, created_at AS last_out_at
+       FROM messages WHERE conversation_id = ? AND direction = 'out'
+       ORDER BY created_at DESC, id DESC LIMIT 1`
+    )
+    .get(conversationId);
+}
+
+// --- Agentes (usuarios del panel) ---
+
+function getAgentByUsername(username) {
+  return db.prepare('SELECT * FROM agents WHERE username = ?').get(username);
+}
+
+function countAgents() {
+  return db.prepare('SELECT COUNT(*) AS n FROM agents').get().n;
+}
+
+function upsertAgent(username, passwordHash, displayName) {
+  db.prepare(
+    `INSERT INTO agents (username, password_hash, display_name, created_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash,
+                                         display_name = excluded.display_name`
+  ).run(username, passwordHash, displayName || null, nowISO());
 }
 
 function getConversation(id) {
@@ -219,7 +257,11 @@ module.exports = {
   recalcConversationTimestamps,
   updateMessageStatusByChannelId,
   listConversations,
+  lastOutgoingInfo,
   getConversation,
   listMessages,
   markConversationRead,
+  getAgentByUsername,
+  countAgents,
+  upsertAgent,
 };

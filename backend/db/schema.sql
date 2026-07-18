@@ -20,6 +20,15 @@ CREATE TABLE IF NOT EXISTS messages (
   media_url TEXT,
   channel_message_id TEXT,
   status TEXT CHECK (status IN ('sent', 'delivered', 'read', 'failed')),
+  agent TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS agents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  display_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

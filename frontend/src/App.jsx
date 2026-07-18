@@ -49,7 +49,17 @@ function Avatar({ conv, size }) {
   return <div className={`avatar avatar-fallback ${conv.channel} ${size || ''}`}>{initial}</div>;
 }
 
-function ConversationItem({ conv, selected, onSelect }) {
+function AttendingBadge({ attending, me }) {
+  if (!attending || attending.agent === me) return null;
+  const min = Math.max(1, Math.round(attending.elapsed_ms / 60000));
+  return (
+    <span className="badge attending" title={`Última respuesta hace ${min} min`}>
+      👤 {attending.agent} atendiendo
+    </span>
+  );
+}
+
+function ConversationItem({ conv, selected, onSelect, me }) {
   const snippet = conv.last_message_body
     ? (conv.last_message_direction === 'out' ? 'Tú: ' : '') + conv.last_message_body
     : 'Sin mensajes';
@@ -69,6 +79,7 @@ function ConversationItem({ conv, selected, onSelect }) {
           {conv.unread ? <span className="unread-dot" /> : null}
         </div>
         <div className="conv-snippet">{snippet}</div>
+        <AttendingBadge attending={conv.attending} me={me} />
         {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
       </div>
     </li>
@@ -105,6 +116,7 @@ function MessageBubble({ msg }) {
         <div className="bubble-body">{msg.body}</div>
         <div className="bubble-meta">
           {formatTime(msg.created_at)}
+          {msg.direction === 'out' && msg.agent ? ` · ${msg.agent}` : ''}
           {msg.direction === 'out' && msg.status ? ` · ${msg.status}` : ''}
         </div>
       </div>
@@ -113,6 +125,7 @@ function MessageBubble({ msg }) {
 }
 
 export default function App() {
+  const [me, setMe] = useState(null);
   const [conversations, setConversations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [thread, setThread] = useState(null); // { conversation, messages }
@@ -138,6 +151,13 @@ export default function App() {
     } catch {
       /* el siguiente poll lo reintenta */
     }
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setMe(d.username))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -201,6 +221,7 @@ export default function App() {
   const conv = thread?.conversation;
   const windowClosed =
     conv?.channel === 'whatsapp' && conv.whatsapp_window && !conv.whatsapp_window.open;
+  const attendedByOther = conv?.attending && conv.attending.agent !== me;
 
   return (
     <div className="app">
@@ -221,6 +242,7 @@ export default function App() {
                 conv={c}
                 selected={c.id === selectedId}
                 onSelect={selectConversation}
+                me={me}
               />
             ))}
           </ul>
@@ -253,6 +275,13 @@ export default function App() {
               <div ref={bottomRef} />
             </div>
 
+            {attendedByOther && (
+              <div className="attending-warning">
+                👤 <strong>{conv.attending.agent}</strong> está atendiendo esta conversación
+                (respondió hace {Math.max(1, Math.round(conv.attending.elapsed_ms / 60000))} min).
+                Coordinaos antes de contestar.
+              </div>
+            )}
             {windowClosed && (
               <div className="window-warning">
                 Ventana de 24h cerrada: WhatsApp solo permite plantillas aprobadas.

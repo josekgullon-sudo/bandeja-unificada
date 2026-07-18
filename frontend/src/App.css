@@ -155,6 +155,15 @@ body {
 
 .badge.window-open { background: #d9f7dc; color: #0b6b2d; }
 .badge.window-closed { background: #e4e6eb; color: #65676b; }
+.badge.attending { background: #fff0c2; color: #7a5b00; margin-right: 6px; }
+
+.attending-warning {
+  padding: 10px 20px;
+  background: #fff0c2;
+  color: #7a5b00;
+  font-size: 13px;
+  border-top: 1px solid #f0d98a;
+}
 
 /* --- Hilo --- */
 .thread {
