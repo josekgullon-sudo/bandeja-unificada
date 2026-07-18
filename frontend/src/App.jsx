@@ -49,6 +49,21 @@ function Avatar({ conv, size }) {
   return <div className={`avatar avatar-fallback ${conv.channel} ${size || ''}`}>{initial}</div>;
 }
 
+function isPending(conv) {
+  return conv.last_message_direction === 'in';
+}
+
+function PendingBadge({ conv }) {
+  if (!isPending(conv)) return null;
+  const min = Math.floor((Date.now() - Date.parse(conv.last_message_at)) / 60000);
+  const label = min < 1 ? 'ahora' : min < 60 ? `${min} min` : `${Math.floor(min / 60)}h ${min % 60}m`;
+  return (
+    <span className="badge pending" title="El último mensaje es del cliente y nadie ha respondido">
+      ⏳ Sin responder · {label}
+    </span>
+  );
+}
+
 function AttendingBadge({ attending, me }) {
   if (!attending || attending.agent === me) return null;
   const min = Math.max(1, Math.round(attending.elapsed_ms / 60000));
@@ -80,6 +95,7 @@ function ConversationItem({ conv, selected, onSelect, me }) {
           {conv.unread ? <span className="unread-dot" /> : null}
         </div>
         <div className="conv-snippet">{snippet}</div>
+        <PendingBadge conv={conv} />
         <AttendingBadge attending={conv.attending} me={me} />
         {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
       </div>
@@ -127,6 +143,7 @@ function MessageBubble({ msg }) {
 
 export default function App() {
   const [me, setMe] = useState(null);
+  const [filter, setFilter] = useState('all'); // all | pending | unread
   const [conversations, setConversations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [thread, setThread] = useState(null); // { conversation, messages }
@@ -219,6 +236,20 @@ export default function App() {
     }
   }
 
+  const pendingCount = conversations.filter(isPending).length;
+  const unreadCount = conversations.filter((c) => c.unread).length;
+
+  // Contador de pendientes en el título de la pestaña del navegador
+  useEffect(() => {
+    document.title = pendingCount > 0 ? `(${pendingCount}) Bandeja unificada` : 'Bandeja unificada';
+  }, [pendingCount]);
+
+  const visibleConversations = conversations.filter((c) => {
+    if (filter === 'pending') return isPending(c);
+    if (filter === 'unread') return c.unread;
+    return true;
+  });
+
   const conv = thread?.conversation;
   const windowClosed =
     conv?.channel === 'whatsapp' && conv.whatsapp_window && !conv.whatsapp_window.open;
@@ -229,15 +260,38 @@ export default function App() {
       <aside className="sidebar">
         <header className="sidebar-header">
           <h1>Bandeja unificada</h1>
+          <nav className="filter-tabs">
+            <button
+              className={filter === 'all' ? 'active' : ''}
+              onClick={() => setFilter('all')}
+            >
+              Todos
+            </button>
+            <button
+              className={`${filter === 'pending' ? 'active' : ''} ${pendingCount ? 'has-pending' : ''}`}
+              onClick={() => setFilter('pending')}
+            >
+              Sin responder{pendingCount ? ` (${pendingCount})` : ''}
+            </button>
+            <button
+              className={filter === 'unread' ? 'active' : ''}
+              onClick={() => setFilter('unread')}
+            >
+              No leídos{unreadCount ? ` (${unreadCount})` : ''}
+            </button>
+          </nav>
         </header>
-        {conversations.length === 0 ? (
+        {visibleConversations.length === 0 ? (
           <p className="empty-list">
-            Sin conversaciones todavía. Cuando un cliente escriba al bot de Telegram
-            o al número de WhatsApp, aparecerá aquí.
+            {conversations.length === 0
+              ? 'Sin conversaciones todavía. Cuando un cliente escriba, aparecerá aquí.'
+              : filter === 'pending'
+                ? '🎉 Todo respondido. Nadie espera contestación.'
+                : 'Nada que mostrar con este filtro.'}
           </p>
         ) : (
           <ul className="conv-list">
-            {conversations.map((c) => (
+            {visibleConversations.map((c) => (
               <ConversationItem
                 key={c.id}
                 conv={c}

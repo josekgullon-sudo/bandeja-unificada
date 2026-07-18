@@ -164,6 +164,37 @@ body {
 .badge.window-open { background: #d9f7dc; color: #0b6b2d; }
 .badge.window-closed { background: #e4e6eb; color: #65676b; }
 .badge.attending { background: #fff0c2; color: #7a5b00; margin-right: 6px; }
+.badge.pending { background: #fde8e8; color: #b42318; margin-right: 6px; }
+
+/* Pestañas de filtro */
+.filter-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.filter-tabs button {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 14px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-tabs button.active {
+  background: var(--text);
+  border-color: var(--text);
+  color: #fff;
+}
+
+.filter-tabs button.has-pending:not(.active) {
+  border-color: #f5b5b5;
+  color: #b42318;
+}
 
 .attending-warning {
   padding: 10px 20px;
