@@ -12,9 +12,28 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
+const fs = require('fs');
 const readline = require('readline/promises');
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
+
+const ENV_PATH = path.join(__dirname, '..', '.env');
+
+/** Escribe TELEGRAM_SESSION en el .env, sustituyendo cualquier línea previa. */
+function saveSessionToEnv(sessionStr) {
+  let content = '';
+  try {
+    content = fs.readFileSync(ENV_PATH, 'utf8');
+  } catch {
+    /* si no existe .env se crea */
+  }
+  const lines = content
+    .split('\n')
+    .filter((line) => !line.startsWith('TELEGRAM_SESSION='));
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+  lines.push(`TELEGRAM_SESSION=${sessionStr}`, '');
+  fs.writeFileSync(ENV_PATH, lines.join('\n'));
+}
 
 async function main() {
   const apiId = parseInt(process.env.TELEGRAM_API_ID, 10);
@@ -40,10 +59,9 @@ async function main() {
     onError: (err) => console.error('Error:', err.message),
   });
 
-  console.log('\n✔ Sesión autorizada correctamente.\n');
-  console.log('Añade esta línea al archivo .env (sustituyendo la que haya):\n');
-  console.log(`TELEGRAM_SESSION=${client.session.save()}`);
-  console.log('\nDespués: pm2 restart inbox');
+  saveSessionToEnv(client.session.save());
+  console.log('\n✔ Sesión autorizada y guardada automáticamente en el .env.');
+  console.log('Solo queda reiniciar: pm2 restart inbox');
 
   await client.disconnect();
   rl.close();
