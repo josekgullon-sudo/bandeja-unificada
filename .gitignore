@@ -9,3 +9,4 @@ backend/uploads/
 frontend/dist/
 .DS_Store
 logs/
+backend/db/.session-secret
