@@ -159,7 +159,66 @@ function MessageBubble({ msg }) {
   );
 }
 
+function Login({ onLogin }) {
+  const [user, setUser] = useState('');
+  const [pass, setPass] = useState('');
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user.trim(), password: pass }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        onLogin(d.username);
+      } else {
+        setErr('Usuario o contraseña incorrectos');
+      }
+    } catch {
+      setErr('No se pudo conectar con el servidor');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="login-screen">
+      <form className="login-card" onSubmit={submit}>
+        <div className="login-logo">💬</div>
+        <h1>Bandeja unificada</h1>
+        <p className="login-sub">Atención al cliente · Telegram & WhatsApp</p>
+        <input
+          placeholder="Usuario"
+          value={user}
+          onChange={(e) => setUser(e.target.value)}
+          autoFocus
+          autoCapitalize="none"
+          autoCorrect="off"
+        />
+        <input
+          type="password"
+          placeholder="Contraseña"
+          value={pass}
+          onChange={(e) => setPass(e.target.value)}
+        />
+        {err && <div className="login-error">{err}</div>}
+        <button type="submit" disabled={busy || !user.trim() || !pass}>
+          {busy ? 'Entrando…' : 'Entrar'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
+  const [authState, setAuthState] = useState('loading'); // loading | anon | in
   const [me, setMe] = useState(null);
   const [filter, setFilter] = useState('all'); // all | pending | unread | archived
   const [search, setSearch] = useState('');
@@ -184,6 +243,7 @@ export default function App() {
     try {
       const res = await fetch('/api/conversations');
       if (res.ok) setConversations(await res.json());
+      else if (res.status === 401) setAuthState('anon'); // sesión caducada
     } catch {
       /* el siguiente poll lo reintenta */
     }
@@ -200,9 +260,12 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/me')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d && setMe(d.username))
-      .catch(() => {});
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => {
+        setMe(d.username);
+        setAuthState('in');
+      })
+      .catch(() => setAuthState('anon'));
   }, []);
 
   const loadQuickReplies = useCallback(async () => {
@@ -368,20 +431,47 @@ export default function App() {
     conv?.channel === 'whatsapp' && conv.whatsapp_window && !conv.whatsapp_window.open;
   const attendedByOther = conv?.attending && conv.attending.agent !== me;
 
+  if (authState === 'loading') {
+    return <div className="login-screen" />;
+  }
+  if (authState === 'anon') {
+    return (
+      <Login
+        onLogin={(username) => {
+          setMe(username);
+          setAuthState('in');
+        }}
+      />
+    );
+  }
+
   return (
     <div className={`app ${selectedId != null ? 'has-selection' : ''}`}>
       <aside className="sidebar">
         <header className="sidebar-header">
           <div className="sidebar-top">
             <h1>Bandeja unificada</h1>
-            <button
-              className={`icon-btn bell ${notifOn ? 'on' : ''}`}
-              title={notifOn ? 'Notificaciones activadas' : 'Activar sonido y notificaciones'}
-              onClick={toggleNotif}
-            >
-              {notifOn ? '🔔' : '🔕'}
-            </button>
+            <div className="sidebar-top-actions">
+              <button
+                className={`icon-btn bell ${notifOn ? 'on' : ''}`}
+                title={notifOn ? 'Notificaciones activadas' : 'Activar sonido y notificaciones'}
+                onClick={toggleNotif}
+              >
+                {notifOn ? '🔔' : '🔕'}
+              </button>
+              <button
+                className="icon-btn"
+                title={me ? `Cerrar sesión (${me})` : 'Cerrar sesión'}
+                onClick={async () => {
+                  await fetch('/api/logout', { method: 'POST' });
+                  window.location.reload();
+                }}
+              >
+                🚪
+              </button>
+            </div>
           </div>
+          {me && <div className="sidebar-me">Conectado como {me}</div>}
           <input
             className="search-input"
             type="search"
