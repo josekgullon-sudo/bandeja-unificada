@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   display_name TEXT,
   username TEXT,
   avatar_url TEXT,
+  notes TEXT,
+  archived INTEGER NOT NULL DEFAULT 0,
   last_message_at TEXT,
   last_customer_message_at TEXT,
   unread INTEGER NOT NULL DEFAULT 0,
@@ -21,6 +23,13 @@ CREATE TABLE IF NOT EXISTS messages (
   channel_message_id TEXT,
   status TEXT CHECK (status IN ('sent', 'delivered', 'read', 'failed')),
   agent TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quick_replies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

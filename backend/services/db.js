@@ -17,6 +17,8 @@ db.exec(schema);
 const convCols = db.prepare('PRAGMA table_info(conversations)').all().map((c) => c.name);
 if (!convCols.includes('username')) db.exec('ALTER TABLE conversations ADD COLUMN username TEXT');
 if (!convCols.includes('avatar_url')) db.exec('ALTER TABLE conversations ADD COLUMN avatar_url TEXT');
+if (!convCols.includes('notes')) db.exec('ALTER TABLE conversations ADD COLUMN notes TEXT');
+if (!convCols.includes('archived')) db.exec('ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
 const msgCols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
 if (!msgCols.includes('agent')) db.exec('ALTER TABLE messages ADD COLUMN agent TEXT');
 
@@ -78,9 +80,10 @@ function saveIncomingMessage(conversationId, { body, mediaUrl, channelMessageId 
     )
     .run(conversationId, body || null, mediaUrl || null, channelMessageId ? String(channelMessageId) : null, ts);
 
+  // Un mensaje nuevo del cliente desarchiva la conversación automáticamente
   db.prepare(
     `UPDATE conversations
-     SET last_message_at = ?, last_customer_message_at = ?, unread = 1
+     SET last_message_at = ?, last_customer_message_at = ?, unread = 1, archived = 0
      WHERE id = ?`
   ).run(ts, ts, conversationId);
 
@@ -211,6 +214,31 @@ function lastOutgoingInfo(conversationId) {
     .get(conversationId);
 }
 
+function setConversationNotes(id, notes) {
+  db.prepare('UPDATE conversations SET notes = ? WHERE id = ?').run(notes || null, id);
+}
+
+function setConversationArchived(id, archived) {
+  db.prepare('UPDATE conversations SET archived = ? WHERE id = ?').run(archived ? 1 : 0, id);
+}
+
+// --- Respuestas rápidas ---
+
+function listQuickReplies() {
+  return db.prepare('SELECT * FROM quick_replies ORDER BY title').all();
+}
+
+function addQuickReply(title, body) {
+  const result = db
+    .prepare('INSERT INTO quick_replies (title, body, created_at) VALUES (?, ?, ?)')
+    .run(title, body, nowISO());
+  return result.lastInsertRowid;
+}
+
+function deleteQuickReply(id) {
+  db.prepare('DELETE FROM quick_replies WHERE id = ?').run(id);
+}
+
 // --- Agentes (usuarios del panel) ---
 
 function getAgentByUsername(username) {
@@ -261,6 +289,11 @@ module.exports = {
   getConversation,
   listMessages,
   markConversationRead,
+  setConversationNotes,
+  setConversationArchived,
+  listQuickReplies,
+  addQuickReply,
+  deleteQuickReply,
   getAgentByUsername,
   countAgents,
   upsertAgent,

@@ -53,6 +53,24 @@ function isPending(conv) {
   return conv.last_message_direction === 'in';
 }
 
+/** Pitido corto para avisar de mensaje nuevo (sin ficheros de audio). */
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.25);
+  } catch {
+    /* sin audio disponible */
+  }
+}
+
 function PendingBadge({ conv }) {
   if (!isPending(conv)) return null;
   const min = Math.floor((Date.now() - Date.parse(conv.last_message_at)) / 60000);
@@ -143,7 +161,15 @@ function MessageBubble({ msg }) {
 
 export default function App() {
   const [me, setMe] = useState(null);
-  const [filter, setFilter] = useState('all'); // all | pending | unread
+  const [filter, setFilter] = useState('all'); // all | pending | unread | archived
+  const [search, setSearch] = useState('');
+  const [notifOn, setNotifOn] = useState(() => localStorage.getItem('notifOn') === '1');
+  const [quickReplies, setQuickReplies] = useState([]);
+  const [showQR, setShowQR] = useState(false);
+  const [qrTitle, setQrTitle] = useState('');
+  const [qrBody, setQrBody] = useState('');
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesDraft, setNotesDraft] = useState('');
   const [conversations, setConversations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [thread, setThread] = useState(null); // { conversation, messages }
@@ -152,6 +178,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const bottomRef = useRef(null);
   const lastCountRef = useRef(0);
+  const lastIncomingRef = useRef(null);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -177,6 +204,51 @@ export default function App() {
       .then((d) => d && setMe(d.username))
       .catch(() => {});
   }, []);
+
+  const loadQuickReplies = useCallback(async () => {
+    try {
+      const r = await fetch('/api/quick-replies');
+      if (r.ok) setQuickReplies(await r.json());
+    } catch {
+      /* reintento en la próxima apertura del panel */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadQuickReplies();
+  }, [loadQuickReplies]);
+
+  // Aviso sonoro + notificación del navegador al entrar un mensaje nuevo
+  useEffect(() => {
+    const latest = conversations
+      .filter((c) => c.last_message_direction === 'in')
+      .reduce((max, c) => Math.max(max, Date.parse(c.last_message_at) || 0), 0);
+    if (lastIncomingRef.current === null) {
+      lastIncomingRef.current = latest;
+      return;
+    }
+    if (latest > lastIncomingRef.current) {
+      lastIncomingRef.current = latest;
+      if (notifOn) {
+        beep();
+        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+          new Notification('Bandeja unificada', { body: 'Nuevo mensaje de un cliente' });
+        }
+      }
+    }
+  }, [conversations, notifOn]);
+
+  function toggleNotif() {
+    const next = !notifOn;
+    setNotifOn(next);
+    localStorage.setItem('notifOn', next ? '1' : '0');
+    if (next) {
+      beep(); // el clic habilita el audio en el navegador
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+    }
+  }
 
   useEffect(() => {
     loadConversations();
@@ -204,8 +276,37 @@ export default function App() {
     setSelectedId(id);
     setThread(null);
     setError(null);
+    setNotesOpen(false);
+    setShowQR(false);
     lastCountRef.current = 0;
     fetch(`/api/conversations/${id}/read`, { method: 'POST' }).then(loadConversations);
+  }
+
+  async function toggleArchive() {
+    if (!conv) return;
+    await fetch(`/api/conversations/${conv.id}/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived: !conv.archived }),
+    });
+    if (!conv.archived) {
+      setSelectedId(null);
+      setThread(null);
+    } else {
+      loadThread(conv.id);
+    }
+    loadConversations();
+  }
+
+  async function saveNotes() {
+    if (!conv) return;
+    await fetch(`/api/conversations/${conv.id}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes: notesDraft }),
+    });
+    setNotesOpen(false);
+    loadThread(conv.id);
   }
 
   async function sendReply(e) {
@@ -236,19 +337,31 @@ export default function App() {
     }
   }
 
-  const pendingCount = conversations.filter(isPending).length;
-  const unreadCount = conversations.filter((c) => c.unread).length;
+  const activeConvs = conversations.filter((c) => !c.archived);
+  const pendingCount = activeConvs.filter(isPending).length;
+  const unreadCount = activeConvs.filter((c) => c.unread).length;
+  const archivedCount = conversations.length - activeConvs.length;
 
   // Contador de pendientes en el título de la pestaña del navegador
   useEffect(() => {
     document.title = pendingCount > 0 ? `(${pendingCount}) Bandeja unificada` : 'Bandeja unificada';
   }, [pendingCount]);
 
-  const visibleConversations = conversations.filter((c) => {
-    if (filter === 'pending') return isPending(c);
-    if (filter === 'unread') return c.unread;
-    return true;
-  });
+  const visibleConversations = conversations
+    .filter((c) => {
+      if (filter === 'archived') return c.archived;
+      if (c.archived) return false;
+      if (filter === 'pending') return isPending(c);
+      if (filter === 'unread') return c.unread;
+      return true;
+    })
+    .filter((c) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return [c.display_name, c.username, c.external_id, c.last_message_body].some(
+        (v) => v && v.toLowerCase().includes(q)
+      );
+    });
 
   const conv = thread?.conversation;
   const windowClosed =
@@ -259,7 +372,23 @@ export default function App() {
     <div className={`app ${selectedId != null ? 'has-selection' : ''}`}>
       <aside className="sidebar">
         <header className="sidebar-header">
-          <h1>Bandeja unificada</h1>
+          <div className="sidebar-top">
+            <h1>Bandeja unificada</h1>
+            <button
+              className={`icon-btn bell ${notifOn ? 'on' : ''}`}
+              title={notifOn ? 'Notificaciones activadas' : 'Activar sonido y notificaciones'}
+              onClick={toggleNotif}
+            >
+              {notifOn ? '🔔' : '🔕'}
+            </button>
+          </div>
+          <input
+            className="search-input"
+            type="search"
+            placeholder="Buscar cliente…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
           <nav className="filter-tabs">
             <button
               className={filter === 'all' ? 'active' : ''}
@@ -278,6 +407,12 @@ export default function App() {
               onClick={() => setFilter('unread')}
             >
               No leídos{unreadCount ? ` (${unreadCount})` : ''}
+            </button>
+            <button
+              className={filter === 'archived' ? 'active' : ''}
+              onClick={() => setFilter('archived')}
+            >
+              🗄️{archivedCount ? ` ${archivedCount}` : ''}
             </button>
           </nav>
         </header>
@@ -327,8 +462,39 @@ export default function App() {
                   {conv.username && <div className="thread-username">{conv.username}</div>}
                 </div>
               </div>
-              {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
+              <div className="thread-actions">
+                {conv.channel === 'whatsapp' && <WindowBadge win={conv.whatsapp_window} />}
+                <button
+                  className={`icon-btn ${conv.notes ? 'has-notes' : ''}`}
+                  title={conv.notes ? 'Ver notas internas' : 'Añadir notas internas'}
+                  onClick={() => {
+                    setNotesDraft(conv.notes || '');
+                    setNotesOpen((o) => !o);
+                  }}
+                >
+                  📝
+                </button>
+                <button
+                  className="icon-btn"
+                  title={conv.archived ? 'Desarchivar' : 'Archivar conversación'}
+                  onClick={toggleArchive}
+                >
+                  {conv.archived ? '📤' : '🗄️'}
+                </button>
+              </div>
             </header>
+
+            {notesOpen && (
+              <div className="notes-panel">
+                <textarea
+                  rows={3}
+                  value={notesDraft}
+                  onChange={(e) => setNotesDraft(e.target.value)}
+                  placeholder="Notas internas sobre este cliente (el cliente nunca las ve)…"
+                />
+                <button onClick={saveNotes}>Guardar</button>
+              </div>
+            )}
 
             <div className="messages">
               {thread.messages.map((m) => (
@@ -352,7 +518,78 @@ export default function App() {
             )}
             {error && <div className="send-error">{error}</div>}
 
+            {showQR && (
+              <div className="qr-panel">
+                {quickReplies.length === 0 && (
+                  <p className="qr-empty">Sin plantillas todavía. Crea la primera abajo.</p>
+                )}
+                <ul>
+                  {quickReplies.map((q) => (
+                    <li key={q.id}>
+                      <button
+                        type="button"
+                        className="qr-use"
+                        onClick={() => {
+                          setDraft((d) => (d ? `${d} ${q.body}` : q.body));
+                          setShowQR(false);
+                        }}
+                      >
+                        <strong>{q.title}</strong>
+                        <span>{q.body}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="qr-del"
+                        title="Eliminar plantilla"
+                        onClick={async () => {
+                          await fetch(`/api/quick-replies/${q.id}`, { method: 'DELETE' });
+                          loadQuickReplies();
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <form
+                  className="qr-add"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!qrTitle.trim() || !qrBody.trim()) return;
+                    await fetch('/api/quick-replies', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ title: qrTitle, body: qrBody }),
+                    });
+                    setQrTitle('');
+                    setQrBody('');
+                    loadQuickReplies();
+                  }}
+                >
+                  <input
+                    placeholder="Título (ej. Pago)"
+                    value={qrTitle}
+                    onChange={(e) => setQrTitle(e.target.value)}
+                  />
+                  <input
+                    placeholder="Texto de la respuesta…"
+                    value={qrBody}
+                    onChange={(e) => setQrBody(e.target.value)}
+                  />
+                  <button type="submit">Añadir</button>
+                </form>
+              </div>
+            )}
+
             <form className="reply-box" onSubmit={sendReply}>
+              <button
+                type="button"
+                className={`icon-btn qr-toggle ${showQR ? 'on' : ''}`}
+                title="Respuestas rápidas"
+                onClick={() => setShowQR((s) => !s)}
+              >
+                ⚡
+              </button>
               <input
                 type="text"
                 value={draft}

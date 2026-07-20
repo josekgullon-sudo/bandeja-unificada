@@ -7,6 +7,11 @@ const {
   listMessages,
   markConversationRead,
   saveOutgoingMessage,
+  setConversationNotes,
+  setConversationArchived,
+  listQuickReplies,
+  addQuickReply,
+  deleteQuickReply,
 } = require('../services/db');
 const telegram = require('../services/telegram');
 const telegramUser = require('../services/telegram-user');
@@ -120,6 +125,48 @@ router.post('/conversations/:id/reply', async (req, res) => {
     console.error(`[reply] error enviando por ${conversation.channel}:`, err.message);
     res.status(502).json({ error: `No se pudo enviar: ${err.message}` });
   }
+});
+
+/**
+ * POST /api/conversations/:id/notes — notas internas (solo agentes).
+ */
+router.post('/conversations/:id/notes', (req, res) => {
+  const conversation = getConversation(req.params.id);
+  if (!conversation) return res.status(404).json({ error: 'Conversación no encontrada' });
+  const notes = typeof req.body.notes === 'string' ? req.body.notes.trim() : '';
+  setConversationNotes(conversation.id, notes);
+  res.json({ ok: true });
+});
+
+/**
+ * POST /api/conversations/:id/archive — archivar o desarchivar.
+ * Un mensaje nuevo del cliente desarchiva automáticamente.
+ */
+router.post('/conversations/:id/archive', (req, res) => {
+  const conversation = getConversation(req.params.id);
+  if (!conversation) return res.status(404).json({ error: 'Conversación no encontrada' });
+  setConversationArchived(conversation.id, Boolean(req.body.archived));
+  res.json({ ok: true });
+});
+
+/**
+ * Respuestas rápidas (plantillas de los agentes).
+ */
+router.get('/quick-replies', (req, res) => {
+  res.json(listQuickReplies());
+});
+
+router.post('/quick-replies', (req, res) => {
+  const title = (req.body.title || '').trim();
+  const body = (req.body.body || '').trim();
+  if (!title || !body) return res.status(400).json({ error: 'Faltan título o texto' });
+  const id = addQuickReply(title, body);
+  res.json({ ok: true, id });
+});
+
+router.delete('/quick-replies/:id', (req, res) => {
+  deleteQuickReply(req.params.id);
+  res.json({ ok: true });
 });
 
 /**
