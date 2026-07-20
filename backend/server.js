@@ -64,23 +64,6 @@ function checkCredentials(user, pass) {
   return Boolean(agent && verifyPassword(pass, agent.password_hash));
 }
 
-// Cache de cabeceras Basic ya verificadas (evita scrypt en cada poll).
-const authCache = new Map();
-
-function authenticateBasic(header) {
-  if (!header || !header.startsWith('Basic ')) return null;
-  const token = header.slice(6);
-  if (authCache.has(token)) return authCache.get(token);
-  const decoded = Buffer.from(token, 'base64').toString('utf8');
-  const sep = decoded.indexOf(':');
-  if (sep <= 0) return null;
-  const user = decoded.slice(0, sep);
-  if (!checkCredentials(user, decoded.slice(sep + 1))) return null;
-  if (authCache.size > 200) authCache.clear();
-  authCache.set(token, user);
-  return user;
-}
-
 function getCookie(req, name) {
   const raw = req.headers.cookie || '';
   for (const part of raw.split(';')) {
@@ -127,10 +110,11 @@ app.post('/api/logout', (req, res) => {
 
 // Protección de la API y los adjuntos. El frontend estático queda público
 // (solo es la carcasa de la app: sin sesión, lo único que muestra es el login).
+// Solo sesiones del login propio: la cabecera Basic que los navegadores
+// guardaron del sistema antiguo se ignora a propósito (si no, "cerrar
+// sesión" no cerraba nada porque el navegador reenviaba esas credenciales).
 app.use(['/api', '/media'], (req, res, next) => {
-  const user =
-    verifySession(getCookie(req, SESSION_COOKIE), SESSION_SECRET) ||
-    authenticateBasic(req.headers.authorization);
+  const user = verifySession(getCookie(req, SESSION_COOKIE), SESSION_SECRET);
   if (user) {
     req.agent = user;
     return next();
